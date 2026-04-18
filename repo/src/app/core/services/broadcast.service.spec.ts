@@ -46,4 +46,46 @@ describe('BroadcastService', () => {
       expect(bc.conflict()).toBeNull();
     }
   });
+
+  it('ignores messages with missing data or wrong type (defensive parse)', () => {
+    const bc = new BroadcastService();
+    bc.watch('c');
+    const ch = (bc as unknown as { channel: { onmessage: ((ev: MessageEvent) => void) | null } }).channel;
+    const seen: unknown[] = [];
+    bc.subscribe((m) => seen.push(m));
+    if (ch && typeof ch.onmessage === 'function') {
+      ch.onmessage(new MessageEvent('message', { data: undefined }));
+      ch.onmessage(new MessageEvent('message', { data: { type: 'something-else', canvasId: 'c', timestamp: 1, tabId: 'x' } }));
+    }
+    expect(seen.length).toBe(0);
+    expect(bc.conflict()).toBeNull();
+  });
+
+  it('publishSave swallows a closed-channel postMessage error', () => {
+    const bc = new BroadcastService();
+    const ch = (bc as unknown as { channel: BroadcastChannel }).channel;
+    // Force postMessage to throw — the catch block must absorb it silently.
+    (ch as unknown as { postMessage: () => never }).postMessage = () => { throw new Error('closed'); };
+    expect(() => bc.publishSave('c1')).not.toThrow();
+  });
+
+  it('publishSave is a no-op when BroadcastChannel is not available', () => {
+    const bc = new BroadcastService();
+    // Null out the channel to exercise the `if (!this.channel) return;` early-exit.
+    (bc as unknown as { channel: BroadcastChannel | null }).channel = null;
+    const origBC = globalThis.BroadcastChannel;
+    (globalThis as unknown as { BroadcastChannel: undefined }).BroadcastChannel = undefined as unknown as undefined;
+    expect(() => bc.publishSave('c1')).not.toThrow();
+    (globalThis as unknown as { BroadcastChannel: typeof origBC }).BroadcastChannel = origBC;
+  });
+
+  it('watch(null) clears any existing conflict', () => {
+    const bc = new BroadcastService();
+    bc.watch('cZ');
+    const ch = (bc as unknown as { channel: { onmessage: ((ev: MessageEvent) => void) | null } }).channel;
+    ch.onmessage!(new MessageEvent('message', { data: { type: 'canvas-saved', canvasId: 'cZ', timestamp: 1, tabId: 'o' } }));
+    expect(bc.conflict()).not.toBeNull();
+    bc.watch(null);
+    expect(bc.conflict()).toBeNull();
+  });
 });

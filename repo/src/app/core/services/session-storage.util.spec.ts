@@ -26,4 +26,28 @@ describe('session-storage.util', () => {
     expect(LS_KEYS.SESSION).toBe('fc_session');
     expect(LS_KEYS.LAST_PROJECT).toBe('fc_last_project');
   });
+
+  it('lsGet returns null when localStorage.getItem throws', () => {
+    const orig = Storage.prototype.getItem;
+    Storage.prototype.getItem = () => { throw new Error('disabled'); };
+    try {
+      expect(lsGet('anything')).toBeNull();
+    } finally {
+      Storage.prototype.getItem = orig;
+    }
+  });
+
+  it('lsSet / lsRemove swallow storage exceptions', () => {
+    const origSet = Storage.prototype.setItem;
+    const origRemove = Storage.prototype.removeItem;
+    Storage.prototype.setItem = () => { throw new Error('quota'); };
+    Storage.prototype.removeItem = () => { throw new Error('quota'); };
+    try {
+      expect(() => lsSet('k', 'v')).not.toThrow();
+      expect(() => lsRemove('k')).not.toThrow();
+    } finally {
+      Storage.prototype.setItem = origSet;
+      Storage.prototype.removeItem = origRemove;
+    }
+  });
 });

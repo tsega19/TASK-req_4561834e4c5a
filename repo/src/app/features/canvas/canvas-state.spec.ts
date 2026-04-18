@@ -61,4 +61,29 @@ describe('canvas-state', () => {
     expect(u.undo(snapshotOf(sampleCanvas()))).toBeNull();
     expect(u.redo(snapshotOf(sampleCanvas()))).toBeNull();
   });
+
+  it('undo/redo caps the opposing stack at the configured limit', () => {
+    const u = new UndoStack(2);
+    const snaps = [snapshotOf(sampleCanvas()), snapshotOf(sampleCanvas()), snapshotOf(sampleCanvas())];
+    for (const s of snaps) u.push(s);
+    // Undo three times, each push to redoStack — triggers the >limit shift branch.
+    u.undo(snapshotOf(sampleCanvas()));
+    u.undo(snapshotOf(sampleCanvas()));
+    // redo stack should now be at limit (2)
+    expect(u.size().redo).toBe(2);
+    // Redo twice, pushing to undoStack — exercises the symmetric >limit shift.
+    u.redo(snapshotOf(sampleCanvas()));
+    u.redo(snapshotOf(sampleCanvas()));
+    expect(u.size().undo).toBeLessThanOrEqual(2);
+  });
+
+  it('snapshotOf preserves tags and decouples groups from the source', () => {
+    const c = sampleCanvas();
+    c.elements[0].tags = ['a', 'b'];
+    const s = snapshotOf(c);
+    expect(s.elements[0].tags).toEqual(['a', 'b']);
+    // Mutating the snapshot tags must not touch the original.
+    s.elements[0].tags!.push('c');
+    expect(c.elements[0].tags).toEqual(['a', 'b']);
+  });
 });

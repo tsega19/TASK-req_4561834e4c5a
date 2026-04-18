@@ -34,4 +34,39 @@ describe('crypto.util', () => {
     expect(a).not.toBe(b);
     expect(a).toMatch(/^[0-9a-f-]{36}$/);
   });
+
+  it('uuid falls back to getRandomValues when crypto.randomUUID is unavailable', () => {
+    const original = globalThis.crypto;
+    // Keep getRandomValues but drop randomUUID so the fallback branch runs.
+    Object.defineProperty(globalThis, 'crypto', {
+      value: {
+        getRandomValues: (arr: Uint8Array) => { for (let i = 0; i < arr.length; i++) arr[i] = (i * 17) & 0xff; return arr; }
+      },
+      configurable: true,
+      writable: true
+    });
+    const id = uuid();
+    // RFC4122 v4: version nibble = 4, variant nibble in {8,9,a,b}
+    expect(id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+    Object.defineProperty(globalThis, 'crypto', { value: original, configurable: true, writable: true });
+  });
+
+  it('uuid falls back to Math.random when getRandomValues is also unavailable', () => {
+    const original = globalThis.crypto;
+    Object.defineProperty(globalThis, 'crypto', { value: {}, configurable: true, writable: true });
+    const id = uuid();
+    expect(id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+    Object.defineProperty(globalThis, 'crypto', { value: original, configurable: true, writable: true });
+  });
+
+  it('sha256Hex falls back to JS when subtle.digest is missing entirely', async () => {
+    const original = globalThis.crypto;
+    Object.defineProperty(globalThis, 'crypto', {
+      value: { getRandomValues: original.getRandomValues?.bind(original) },
+      configurable: true, writable: true
+    });
+    const h = await sha256Hex('hello');
+    expect(h).toBe('2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824');
+    Object.defineProperty(globalThis, 'crypto', { value: original, configurable: true, writable: true });
+  });
 });

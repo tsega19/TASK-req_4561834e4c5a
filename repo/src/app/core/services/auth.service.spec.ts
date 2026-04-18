@@ -145,4 +145,52 @@ describe('AuthService', () => {
     auth.touchActivity();
     expect(auth.session()!.lastActivity).toBeGreaterThanOrEqual(before);
   });
+
+  it('unknown-user single failure engages the LS cooldown when maxFailedAttempts=1 (registerFailure without a user row)', async () => {
+    // New AuthService with maxFailedAttempts=1 to exercise the
+    // `registerFailure(uname, 0, user=undefined)` → cooldown path for a
+    // non-existent user, which is a security-relevant branch.
+    TestBed.resetTestingModule();
+    TestBed.configureTestingModule({
+      providers: [{ provide: AppConfigService, useValue: cfgWith({ maxFailedAttempts: 1 }) }]
+    });
+    const auth2 = TestBed.inject(AuthService);
+    await TestBed.inject(DbService).init();
+    await auth2.bootstrapSeed();
+    const first = await auth2.attemptLogin('ghost', 'whatever');
+    expect(first.reason).toBe('cooldown');
+    expect(localStorage.getItem(LS_KEYS.COOLDOWN_PREFIX + 'ghost')).not.toBeNull();
+  });
+
+  it('cooldownRemainingMs returns 0 for a malformed LS value', async () => {
+    localStorage.setItem(LS_KEYS.COOLDOWN_PREFIX + 'garbled', 'not-a-number');
+    expect(await auth.cooldownRemainingMs('garbled')).toBe(0);
+  });
+
+  it('touchActivity is a no-op with no active session', () => {
+    // Runs the `if (!s) return;` early-exit (line 159 uncovered branch).
+    expect(auth.session()).toBeNull();
+    expect(() => auth.touchActivity()).not.toThrow();
+  });
+
+  it('hasRole returns false without a session', () => {
+    expect(auth.hasRole(['admin'])).toBe(false);
+  });
+
+  it('startInactivityWatch is idempotent — calling twice wires handlers once', async () => {
+    await auth.bootstrapSeed();
+    await auth.attemptLogin('admin', 'demo-change-me-admin');
+    auth.startInactivityWatch();
+    // Second call hits the early-return when activityHandler is already set.
+    expect(() => auth.startInactivityWatch()).not.toThrow();
+    auth.stopInactivityWatch();
+  });
+
+  it('logout with no session does not record an audit event (silent no-op)', async () => {
+    // Covers the `if (current)` = false branch of logout().
+    const before = (await db.audit.all()).length;
+    auth.logout('manual');
+    const after = (await db.audit.all()).length;
+    expect(after).toBe(before);
+  });
 });

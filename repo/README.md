@@ -4,6 +4,19 @@ Browser-native offline diagramming SPA (Angular 17). Zero backend, all data in I
 
 ## Quick start
 
+Two supported paths — pick either.
+
+### Option A: Local Node toolchain (Node 20+)
+
+```bash
+npm install
+npm start       # runs `ng serve` on http://localhost:4200
+```
+
+Additional scripts: `npm run build`, `npm test` (Jest with coverage), `npm run test:e2e` (Playwright), `npm run lint` (typecheck).
+
+### Option B: Docker 20+
+
 ```bash
 docker-compose up --build
 ```
@@ -48,7 +61,13 @@ This builds a Playwright-ready image, runs Jest unit tests (coverage in `.tmp/co
 - `src/app/workers/` — import, SVG export, version compaction.
 - Service Worker for offline-first PWA.
 
-See [`docs/design.md`](../docs/design.md) for full details. Additional docs: [`docs/PRD.md`](../docs/PRD.md), [`docs/guide.md`](../docs/guide.md), [`docs/questions.md`](../docs/questions.md).
+See [`docs/design.md`](../docs/design.md) for full details. Additional docs: [`docs/api_aspec.md`](../docs/api_aspec.md), [`docs/questions.md`](../docs/questions.md).
+
+## User-visible guarantees
+
+- **Element cap:** canvases are hard-limited to 5,000 elements. Crossing 80% of the cap emits a one-shot diagnostics alert into the immutable audit timeline; attempting to exceed the cap surfaces a blocking modal.
+- **Version history:** each canvas keeps the most recent 30 versions. Older snapshots are pruned automatically; any version in the list can be rolled back to, which first snapshots the current state as a `pre-rollback` version so the operation itself is reversible.
+- **Autosave + conflict:** canvases autosave every 10s; if another tab saves the same canvas, a conflict banner appears with "Reload latest" / "Keep mine" options.
 
 ## Tech guard rails
 

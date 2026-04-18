@@ -6,6 +6,8 @@ import { AppConfigService, buildAppConfig } from '../../config/app-config.servic
 import { AuthService } from '../../core/services/auth.service';
 import { signal } from '@angular/core';
 import { SessionInfo } from '../../core/models/models';
+// DbService is inferred via TestBed.inject; no re-import needed but keep type for clarity.
+void DbService;
 
 function fakeAuth(role: 'admin' | 'editor' | 'reviewer'): Partial<AuthService> {
   const s = signal<SessionInfo | null>({ userId: 'u1', username: 'u', role, issuedAt: 1, lastActivity: 1 });
@@ -58,5 +60,28 @@ describe('ReviewService', () => {
     expect(tickets[0].status).toBe('done');
     await svc.updateReviewStatus('missing', 'resolved');
     await svc.updateTicketStatus('missing', 'done');
+  });
+
+  it('createReview/createTicket stamp createdBy="anonymous" when there is no session', async () => {
+    // Null-session branch for `session?.userId ?? 'anonymous'`.
+    TestBed.resetTestingModule();
+    TestBed.configureTestingModule({
+      providers: [
+        { provide: AppConfigService, useValue: { get: () => buildAppConfig() } as AppConfigService },
+        { provide: AuthService, useValue: { session: signal<SessionInfo | null>(null), role: () => null } as unknown as AuthService }
+      ]
+    });
+    const svc = TestBed.inject(ReviewService);
+    const r = await svc.createReview({ canvasId: 'c', projectId: 'p', content: 'ok' });
+    expect(r.createdBy).toBe('anonymous');
+    const t = await svc.createTicket({ reviewId: r.id, canvasId: 'c', projectId: 'p', title: 't', description: 'd', priority: 'low' });
+    expect(t.createdBy).toBe('anonymous');
+  });
+
+  it('createTicket tolerates missing title/description fields without crashing', async () => {
+    const { svc } = build('editor');
+    // input.title ?? '' / input.description ?? '' — null coalescing branch.
+    const input = { reviewId: 'r', canvasId: 'c', projectId: 'p', priority: 'low' } as unknown as Parameters<ReturnType<typeof build>['svc']['createTicket']>[0];
+    await expect(svc.createTicket(input)).rejects.toThrow(/1–200/);
   });
 });

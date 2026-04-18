@@ -83,4 +83,69 @@ describe('DbService', () => {
     await db.clear('canvases');
     expect(await db.count('canvases')).toBe(0);
   });
+
+  it('typed facades: versions/reviews/tickets/blobs/audit exercise every wrapper method', async () => {
+    await db.init();
+    const cId = uuid();
+    const rId = uuid();
+    const tId = uuid();
+    await db.versions.put({ id: 'v1', canvasId: cId, projectId: 'p', versionNumber: 1, snapshotJson: '{}', createdAt: 1, createdBy: 'u' });
+    expect((await db.versions.all()).length).toBe(1);
+    expect((await db.versions.byCanvas(cId)).length).toBe(1);
+    await db.versions.delete('v1');
+    expect((await db.versions.all()).length).toBe(0);
+
+    await db.reviews.put({ id: rId, canvasId: cId, projectId: 'p', content: 'x', status: 'open', createdBy: 'u', createdAt: 1, updatedAt: 1 });
+    expect((await db.reviews.all()).length).toBe(1);
+    expect((await db.reviews.byCanvas(cId)).length).toBe(1);
+    await db.reviews.delete(rId);
+
+    await db.tickets.put({ id: tId, reviewId: 'r', canvasId: cId, projectId: 'p', title: 't', description: 'd', priority: 'low', status: 'open', createdBy: 'u', createdAt: 1, updatedAt: 1, attachmentIds: [] });
+    expect((await db.tickets.all()).length).toBe(1);
+    expect((await db.tickets.byReview('r')).length).toBe(1);
+    await db.tickets.delete(tId);
+
+    await db.blobs.put({ key: 'b1', name: 'a', mimeType: 'text/plain', sizeBytes: 0, data: new ArrayBuffer(0), createdAt: 1 });
+    expect((await db.blobs.get('b1'))?.key).toBe('b1');
+    await db.blobs.delete('b1');
+    expect(await db.blobs.get('b1')).toBeUndefined();
+
+    await db.audit.put({ id: 'a1', timestamp: 1, userId: 'u', username: 'u', action: 'x', entityType: 'y', entityId: 'z' });
+    expect((await db.audit.all()).length).toBe(1);
+    await db.audit.delete('a1');
+    expect((await db.audit.all()).length).toBe(0);
+  });
+
+  it('users.get returns the seeded record by id', async () => {
+    const id = uuid();
+    await db.users.put({ id, username: 'bob', passwordHash: 'x', role: 'editor', createdAt: 1, updatedAt: 1, failedAttempts: 0 });
+    const u = await db.users.get(id);
+    expect(u?.username).toBe('bob');
+  });
+
+  it('healthCheck reports ok:false with a descriptive detail on read-back mismatch', async () => {
+    const broken = db as unknown as { init: () => Promise<unknown> };
+    const origInit = broken.init.bind(db);
+    broken.init = async () => ({
+      put: async () => undefined,
+      // Force the read-back !== sentinelKey branch.
+      get: async () => ({ key: 'wrong' }),
+      delete: async () => undefined
+    });
+    const res = await db.healthCheck();
+    expect(res.ok).toBe(false);
+    expect(res.detail).toMatch(/mismatch/);
+    broken.init = origInit;
+  });
+
+  it('storageEstimate treats quota=0 as 0% (no divide-by-zero)', async () => {
+    const original = (navigator as unknown as { storage?: unknown }).storage;
+    Object.defineProperty(navigator, 'storage', {
+      configurable: true,
+      value: { estimate: async () => ({ usage: 0, quota: 0 }) }
+    });
+    const est = await db.storageEstimate();
+    expect(est.percent).toBe(0);
+    Object.defineProperty(navigator, 'storage', { configurable: true, value: original });
+  });
 });

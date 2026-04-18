@@ -56,4 +56,21 @@ describe('LoggerService', () => {
     for (let i = 0; i < 600; i++) logger.debug('m', 's', `msg-${i}`);
     expect(logger.recent().length).toBe(500);
   });
+
+  it('redact stringifies non-plain-object, non-array values (symbols, functions)', () => {
+    // Functions and symbols fall through to the `return String(input)` branch.
+    const fnResult = redact(() => 123);
+    const symResult = redact(Symbol('s'));
+    expect(typeof fnResult).toBe('string');
+    expect(typeof symResult).toBe('string');
+    expect(String(symResult)).toMatch(/Symbol/);
+  });
+
+  it('error level invokes console.error even when the sink is the default no-op', () => {
+    const logger = new LoggerService();
+    const spy = jest.spyOn(console, 'error').mockImplementation(() => { /* no-op */ });
+    logger.error('m', 's', 'serious');
+    expect(spy).toHaveBeenCalled();
+    spy.mockRestore();
+  });
 });

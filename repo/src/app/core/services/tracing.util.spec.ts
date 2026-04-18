@@ -36,4 +36,15 @@ describe('tracing.util', () => {
     expect(traces[0].action).toBe('test.err');
     expect(traces[0].detail).toMatch(/boom/);
   });
+
+  it('caps the ring buffer at 100 entries', async () => {
+    for (let i = 0; i < 105; i++) {
+      await trace(logger, `t.${i}`, 1000, async () => i);
+    }
+    const traces = recentTraces();
+    expect(traces.length).toBe(100);
+    // Oldest 5 should have been shifted out.
+    expect(traces[0].action).toBe('t.5');
+    expect(traces[traces.length - 1].action).toBe('t.104');
+  });
 });

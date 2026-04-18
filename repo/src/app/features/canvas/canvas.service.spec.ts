@@ -115,4 +115,146 @@ describe('CanvasService', () => {
     await svc.save(c);
     expect(c.updatedAt).toBeGreaterThanOrEqual(before);
   });
+
+  it('get returns undefined for a missing canvas id', async () => {
+    expect(await svc.get('does-not-exist')).toBeUndefined();
+  });
+
+  it('createVersion numbers from 1 when no prior versions exist and audits the snapshot', async () => {
+    const c = makeCanvas();
+    await db.canvases.put(c);
+    const v = await svc.createVersion(c);
+    expect(v.versionNumber).toBe(1);
+    const audit = (await db.audit.all()).find((a) => a.action === 'canvas.version');
+    expect(audit?.entityId).toBe(c.id);
+  });
+
+  it('rollback pre-snapshots the current state as a pre-rollback version', async () => {
+    const c = makeCanvas();
+    await db.canvases.put(c);
+    const v = await svc.createVersion(c, 'initial');
+    // Mutate current state, then roll back.
+    svc.tryAddElement(c, svc.createElement('button', 5, 5));
+    await svc.rollback(c, v.id);
+    const labels = (await svc.listVersions(c.id)).map((x) => x.label);
+    expect(labels).toContain('pre-rollback');
+  });
+
+  it('renameDuplicateId returns the original id when not in the set (short-circuit branch)', () => {
+    expect(svc.renameDuplicateId(new Set<string>(), 'fresh')).toBe('fresh');
+  });
+
+  it('deleteElements preserves connections and groups that do not reference deleted ids', () => {
+    const c = makeCanvas();
+    svc.tryAddElement(c, svc.createElement('button', 0, 0));
+    svc.tryAddElement(c, svc.createElement('input', 10, 10));
+    svc.tryAddElement(c, svc.createElement('label', 20, 20));
+    const [a, b, third] = c.elements;
+    c.connections.push({ id: 'keep', fromId: b.id, toId: third.id, style: 'straight' });
+    c.groups.push({ id: 'gkeep', name: 'g', elementIds: [b.id, third.id] });
+    svc.deleteElements(c, [a.id]);
+    expect(c.connections.find((x) => x.id === 'keep')).toBeDefined();
+    expect(c.groups.find((g) => g.id === 'gkeep')?.elementIds.length).toBe(2);
+  });
+
+  it('emits a diagnostics.alert.elementCap audit event exactly once when crossing the warn threshold', async () => {
+    // elementCap=3 means the default capWarnPct=80 triggers on the 3rd element (100%).
+    // Rebuild the TestBed with a small cap and a high maxVersions to stay focused on the alert path.
+    TestBed.resetTestingModule();
+    TestBed.configureTestingModule({
+      providers: [
+        { provide: AppConfigService, useValue: cfgWith({ elementCap: 5, maxVersions: 2 }) },
+        { provide: AuthService, useValue: auth() }
+      ]
+    });
+    const small = TestBed.inject(CanvasService);
+    const freshDb = TestBed.inject(DbService);
+    await freshDb.init();
+    const c = makeCanvas();
+
+    // Below threshold: 2/5 = 40% — no alert.
+    small.tryAddElement(c, small.createElement('button', 0, 0));
+    small.tryAddElement(c, small.createElement('button', 0, 0));
+    // Let the microtask from maybeRecordCapThreshold flush.
+    await new Promise((r) => setTimeout(r, 0));
+    let audit = (await freshDb.audit.all()).filter((a) => a.action === 'diagnostics.alert.elementCap');
+    expect(audit.length).toBe(0);
+
+    // Cross the 80% threshold: 4/5 = 80% — exactly one alert.
+    small.tryAddElement(c, small.createElement('button', 0, 0));
+    small.tryAddElement(c, small.createElement('button', 0, 0));
+    await new Promise((r) => setTimeout(r, 0));
+    audit = (await freshDb.audit.all()).filter((a) => a.action === 'diagnostics.alert.elementCap');
+    expect(audit.length).toBe(1);
+    expect(audit[0].entityType).toBe('canvas');
+    expect(audit[0].entityId).toBe(c.id);
+    expect(audit[0].details).toMatch(/4\/5/);
+
+    // Further adds must not emit a second alert (debounced per canvas id).
+    small.tryAddElement(c, small.createElement('button', 0, 0));
+    await new Promise((r) => setTimeout(r, 0));
+    audit = (await freshDb.audit.all()).filter((a) => a.action === 'diagnostics.alert.elementCap');
+    expect(audit.length).toBe(1);
+  });
+
+  it('does not emit the cap audit event when adds stay below the warn threshold', async () => {
+    TestBed.resetTestingModule();
+    TestBed.configureTestingModule({
+      providers: [
+        { provide: AppConfigService, useValue: cfgWith({ elementCap: 100 }) },
+        { provide: AuthService, useValue: auth() }
+      ]
+    });
+    const loose = TestBed.inject(CanvasService);
+    const freshDb = TestBed.inject(DbService);
+    await freshDb.init();
+    const c = makeCanvas();
+    for (let i = 0; i < 10; i++) loose.tryAddElement(c, loose.createElement('button', 0, 0));
+    await new Promise((r) => setTimeout(r, 0));
+    const audit = (await freshDb.audit.all()).filter((a) => a.action === 'diagnostics.alert.elementCap');
+    expect(audit.length).toBe(0);
+  });
+
+  it('cap-threshold alert is a no-op when elementCap is 0 (defensive guard)', async () => {
+    TestBed.resetTestingModule();
+    TestBed.configureTestingModule({
+      providers: [
+        { provide: AppConfigService, useValue: cfgWith({ elementCap: 0 }) },
+        { provide: AuthService, useValue: auth() }
+      ]
+    });
+    const zero = TestBed.inject(CanvasService);
+    const freshDb = TestBed.inject(DbService);
+    await freshDb.init();
+    const c = makeCanvas();
+    // With cap=0, atCap() is true immediately, so tryAddElement returns
+    // { ok: false } without reaching the threshold emitter. Call the private
+    // emitter directly (with elements bypassing the cap check) to exercise
+    // the `cap <= 0` early-return branch.
+    (c.elements as unknown as Array<unknown>).push({ id: 'x', type: 'button', x: 0, y: 0, width: 1, height: 1 });
+    await (zero as unknown as { maybeRecordCapThreshold: (x: unknown) => Promise<void> }).maybeRecordCapThreshold(c);
+    const audit = (await freshDb.audit.all()).filter((a) => a.action === 'diagnostics.alert.elementCap');
+    expect(audit.length).toBe(0);
+  });
+
+  it('cap-threshold alert is tracked per canvas id — two canvases each emit their own alert', async () => {
+    TestBed.resetTestingModule();
+    TestBed.configureTestingModule({
+      providers: [
+        { provide: AppConfigService, useValue: cfgWith({ elementCap: 5 }) },
+        { provide: AuthService, useValue: auth() }
+      ]
+    });
+    const s = TestBed.inject(CanvasService);
+    const freshDb = TestBed.inject(DbService);
+    await freshDb.init();
+    const a = makeCanvas();
+    const b = makeCanvas();
+    for (let i = 0; i < 4; i++) s.tryAddElement(a, s.createElement('button', 0, 0));
+    for (let i = 0; i < 4; i++) s.tryAddElement(b, s.createElement('button', 0, 0));
+    await new Promise((r) => setTimeout(r, 0));
+    const audit = (await freshDb.audit.all()).filter((x) => x.action === 'diagnostics.alert.elementCap');
+    expect(audit.length).toBe(2);
+    expect(new Set(audit.map((x) => x.entityId))).toEqual(new Set([a.id, b.id]));
+  });
 });

@@ -10,17 +10,9 @@ module.exports = {
     '!src/app/**/*.spec.ts',
     '!src/app/**/index.ts',
     '!src/app/workers/*.ts',
-    '!src/app/features/canvas/canvas-editor.component.ts',
-    '!src/app/features/admin/admin-panel.component.ts',
-    '!src/app/features/reviewer/reviewer-panel.component.ts',
-    '!src/app/features/diagnostics/diagnostics.component.ts',
-    '!src/app/features/backup/backup.component.ts',
-    '!src/app/features/projects/project-list.component.ts',
-    '!src/app/features/auth/login.component.ts',
-    '!src/app/app.component.ts',
-    '!src/app/app.routes.ts',
-    '!src/app/app.config.ts',
-    '!src/app/shared/components/*.ts'
+    // Istanbul cannot instrument `new Worker(new URL(..., import.meta.url))` —
+    // the editor is still unit-tested by its spec, but excluded from coverage collection.
+    '!src/app/features/canvas/canvas-editor.component.ts'
   ],
   coverageDirectory: '.tmp/coverage',
   coverageReporters: ['text-summary', 'lcov', 'json-summary'],

@@ -27,6 +27,11 @@ export class CanvasService {
   private readonly bc = inject(BroadcastService);
   private readonly audit = inject(AuditService);
 
+  // Canvases that have already emitted a `diagnostics.alert.elementCap`
+  // audit event in this session, keyed by canvas id. Debounces the alert
+  // so fills that hover around the threshold do not spam the audit log.
+  private readonly capAlerted = new Set<string>();
+
   async get(id: string): Promise<CanvasRecord | undefined> {
     return this.db.canvases.get(id);
   }
@@ -95,7 +100,32 @@ export class CanvasService {
     const copy: CanvasElement = { ...el };
     copy.zIndex = (canvas.elements.reduce((m, e) => Math.max(m, e.zIndex ?? 0), 0)) + 1;
     canvas.elements.push(copy);
+    void this.maybeRecordCapThreshold(canvas);
     return { ok: true, element: copy };
+  }
+
+  /**
+   * Emit a `diagnostics.alert.elementCap` audit event the first time a canvas
+   * crosses the configured `diagnostics.capWarnPct` threshold. Idempotent per
+   * canvas-id within the current session — repeated hovering around the
+   * threshold will not duplicate the event.
+   */
+  private async maybeRecordCapThreshold(canvas: CanvasRecord): Promise<void> {
+    if (this.capAlerted.has(canvas.id)) return;
+    const cap = this.cfg.get().canvas.elementCap;
+    if (cap <= 0) return;
+    const pct = (canvas.elements.length / cap) * 100;
+    const warn = this.cfg.get().diagnostics.capWarnPct;
+    if (pct < warn) return;
+    this.capAlerted.add(canvas.id);
+    this.logger.warn('canvas', 'cap-threshold', 'element cap threshold crossed', { id: canvas.id, pct, warn });
+    await this.audit.record(
+      this.auth.session(),
+      'diagnostics.alert.elementCap',
+      'canvas',
+      canvas.id,
+      `${canvas.elements.length}/${cap} (${pct.toFixed(1)}%)`
+    );
   }
 
   deleteElements(canvas: CanvasRecord, ids: string[]): void {

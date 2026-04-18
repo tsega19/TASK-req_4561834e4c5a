@@ -30,4 +30,16 @@ describe('AuditService', () => {
     const list = await svc.list();
     expect(list[0].username).toBe('anonymous');
   });
+
+  it('record() swallows DB errors and logs them (does not throw)', async () => {
+    // Force the underlying put to reject so the catch block executes.
+    const broken = db as unknown as { audit: { put: (e: unknown) => Promise<void> } };
+    const originalPut = broken.audit.put.bind(db.audit);
+    broken.audit.put = () => Promise.reject(new Error('write failed'));
+    await expect(svc.record(null, 'boom', 'e', 'x')).resolves.toBeUndefined();
+    broken.audit.put = originalPut;
+    // The failed entry must not be persisted.
+    const list = await svc.list();
+    expect(list.find((e) => e.action === 'boom')).toBeUndefined();
+  });
 });
