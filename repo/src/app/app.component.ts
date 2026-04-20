@@ -5,8 +5,6 @@ import { AuthService } from './core/services/auth.service';
 import { ToastContainerComponent } from './shared/components/toast-container.component';
 import { ConflictBannerComponent } from './shared/components/conflict-banner.component';
 import { NotificationCenterComponent } from './shared/components/notification-center.component';
-import { DbService } from './core/services/db.service';
-import { LoggerService } from './logging/logger.service';
 import { filter } from 'rxjs/operators';
 
 @Component({
@@ -51,21 +49,17 @@ import { filter } from 'rxjs/operators';
 })
 export class AppComponent implements OnInit {
   readonly auth = inject(AuthService);
-  private readonly db = inject(DbService);
   private readonly router = inject(Router);
-  private readonly logger = inject(LoggerService);
-  ready = false;
+  // APP_INITIALIZER (app.config.ts) already completes db.init, bootstrapSeed, and
+  // restoreSession before Angular creates this component, so the app is fully
+  // ready on first render. Keeping ready=true avoids the router-outlet being absent
+  // from the DOM during the initial navigation, which caused the second-tab scenario
+  // to miss the canvas route activation and time out waiting for toolbar elements.
+  readonly ready = true;
 
-  async ngOnInit(): Promise<void> {
-    try {
-      await this.db.init();
-      await this.auth.bootstrapSeed();
-      this.auth.restoreSession();
-      this.auth.startInactivityWatch();
-    } catch (e) {
-      this.logger.error('app', 'boot', 'initialization failed', { error: String(e) });
-    }
-    this.ready = true;
+  ngOnInit(): void {
+    // startInactivityWatch is not in APP_INITIALIZER, so wire it here.
+    this.auth.startInactivityWatch();
     this.router.events.pipe(filter((e) => e instanceof NavigationEnd)).subscribe(() => {
       if (!this.auth.session() && !this.router.url.startsWith('/login')) {
         void this.router.navigate(['/login']);
