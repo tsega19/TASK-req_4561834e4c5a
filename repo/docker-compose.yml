@@ -45,7 +45,14 @@ services:
     container_name: flowcanvas-tests
     environment:
       CI: "1"
-      E2E_BASE_URL: "http://flowcanvas:80"
+      # Point tests at http://localhost (a secure context per Chromium, so
+      # navigator.serviceWorker and window.crypto.subtle are available) and
+      # remap the name to the flowcanvas service via the browser's host-rules
+      # resolver. Without this, the origin would be http://flowcanvas:80, which
+      # is insecure — SW registration then silently never happens and the
+      # precached-shell offline tests can't run.
+      E2E_BASE_URL: "http://localhost"
+      E2E_CHROMIUM_HOST_RULES: "MAP localhost flowcanvas"
     depends_on:
       - flowcanvas
     volumes:

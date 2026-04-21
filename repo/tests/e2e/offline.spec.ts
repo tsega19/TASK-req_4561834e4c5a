@@ -11,31 +11,66 @@ const ADMIN = {
 const SW_REGISTER_TIMEOUT_MS = 45_000;
 
 /**
- * Wait for the service worker to reach `ready` state. Returns when the SW is
- * controlling the page, or throws on timeout. Older versions of this test
- * suite called `test.skip()` when SW didn't register in time — that hid real
- * regressions behind a green E2E run. The app is built with SW enabled in
- * production (`provideServiceWorker(..., { enabled: !isDevMode() })`), and
- * Docker serves the production build, so missing SW IS a failure, not a
- * tolerated environment quirk.
+ * Wait for the service worker to be ready AND in control of the current page.
+ * `navigator.serviceWorker.ready` resolves as soon as there is an active
+ * registration for the scope, but the active worker only becomes the page's
+ * `controller` after the next navigation — so a plain `.ready`-and-reload
+ * test can still bypass the SW on the *first* reload. We do an explicit
+ * (online) reload once the registration is active to adopt the controller
+ * before the caller flips the context offline.
+ *
+ * Older versions of this test suite called `test.skip()` whenever SW didn't
+ * register in time — that hid real regressions behind a green E2E run. The
+ * app is built with SW enabled in production (`provideServiceWorker(..., {
+ * enabled: !isDevMode() })`) and Docker serves the production build, so
+ * missing SW IS a failure, not a tolerated environment quirk.
  */
 async function requireServiceWorker(page: Page): Promise<void> {
   const deadline = Date.now() + SW_REGISTER_TIMEOUT_MS;
   let lastError = '';
   while (Date.now() < deadline) {
     const status = await page.evaluate(async () => {
-      if (!('serviceWorker' in navigator)) return { ready: false, reason: 'navigator.serviceWorker missing' };
-      const reg = await Promise.race([
-        navigator.serviceWorker.ready.then((r) => ({ ready: true, reason: 'ready', scope: r.scope })),
-        new Promise<{ ready: false; reason: string }>((resolve) => setTimeout(() => resolve({ ready: false, reason: 'ready-poll-timeout' }), 1000))
-      ]).catch((e) => ({ ready: false, reason: 'ready-threw: ' + String(e) }));
-      return reg;
-    }).catch((e) => ({ ready: false, reason: 'evaluate-threw: ' + String(e) }));
-    if ((status as { ready: boolean }).ready) return;
-    lastError = (status as { reason: string }).reason;
+      if (!('serviceWorker' in navigator)) return { state: 'no-api' as const };
+      const readyProbe = await Promise.race([
+        navigator.serviceWorker.ready.then(() => ({ state: 'ready' as const })),
+        new Promise<{ state: 'ready-poll-timeout' }>((r) => setTimeout(() => r({ state: 'ready-poll-timeout' }), 1000))
+      ]).catch((e) => ({ state: 'ready-threw' as const, detail: String(e) }));
+      if (readyProbe.state !== 'ready') return readyProbe;
+      if (!navigator.serviceWorker.controller) return { state: 'ready-no-controller' as const };
+      return { state: 'controlling' as const };
+    }).catch((e) => ({ state: 'evaluate-threw' as const, detail: String(e) }));
+
+    if (status.state === 'controlling') {
+      // One final sanity barrier: ask the SW to respond to a HEAD of the
+      // index. If the precache isn't populated yet this returns from network,
+      // and going offline would then fail the reload. Waiting here turns a
+      // race into a hard signal.
+      const indexReachable = await page.evaluate(async () => {
+        try {
+          const res = await fetch('/index.html', { cache: 'no-cache' });
+          return res.ok;
+        } catch {
+          return false;
+        }
+      });
+      if (indexReachable) return;
+      lastError = 'controlling-but-index-not-cached';
+      await page.waitForTimeout(500);
+      continue;
+    }
+    if (status.state === 'ready-no-controller') {
+      // Active worker exists but is not yet controlling this page. A plain
+      // (online) reload makes the next navigation go through the SW, so the
+      // caller's subsequent offline reload will hit the precache instead of
+      // the network. Wait for networkidle so the SW settles before the next
+      // probe, otherwise the loop races the new page's startup.
+      await page.reload({ waitUntil: 'networkidle' });
+      continue;
+    }
+    lastError = status.state + (('detail' in status && status.detail) ? `: ${status.detail}` : '');
     await page.waitForTimeout(500);
   }
-  throw new Error(`service worker did not reach 'ready' within ${SW_REGISTER_TIMEOUT_MS}ms (last status: ${lastError}). ` +
+  throw new Error(`service worker did not start controlling the page within ${SW_REGISTER_TIMEOUT_MS}ms (last status: ${lastError}). ` +
     `The production build registers SW via registerWhenStable:30000 — missing SW means the precached app shell is unavailable ` +
     `and the offline guarantee documented in README is broken.`);
 }
