@@ -5,42 +5,50 @@ const ADMIN = {
   pass: process.env['SEED_ADMIN_PASSPHRASE'] ?? 'demo-change-me-admin'
 };
 
+// Must be >= the app's `registerWhenStable:30000` window (app.config.ts) plus
+// a cushion for Chromium's post-load idle period. Anything shorter races the
+// app's own registration schedule.
+const SW_REGISTER_TIMEOUT_MS = 45_000;
+
 /**
- * Poll for a service-worker registration for up to `timeoutMs`. Returns true
- * as soon as one is ready. Historically these tests blanket-skipped after a
- * single probe, so automation runs could silently drop offline coverage.
+ * Wait for the service worker to reach `ready` state. Returns when the SW is
+ * controlling the page, or throws on timeout. Older versions of this test
+ * suite called `test.skip()` when SW didn't register in time — that hid real
+ * regressions behind a green E2E run. The app is built with SW enabled in
+ * production (`provideServiceWorker(..., { enabled: !isDevMode() })`), and
+ * Docker serves the production build, so missing SW IS a failure, not a
+ * tolerated environment quirk.
  */
-async function waitForServiceWorker(page: Page, timeoutMs = 20_000): Promise<boolean> {
-  const deadline = Date.now() + timeoutMs;
+async function requireServiceWorker(page: Page): Promise<void> {
+  const deadline = Date.now() + SW_REGISTER_TIMEOUT_MS;
+  let lastError = '';
   while (Date.now() < deadline) {
-    const ready = await page.evaluate(async () => {
-      if (!('serviceWorker' in navigator)) return false;
+    const status = await page.evaluate(async () => {
+      if (!('serviceWorker' in navigator)) return { ready: false, reason: 'navigator.serviceWorker missing' };
       const reg = await Promise.race([
-        navigator.serviceWorker.ready.then(() => true),
-        new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 1000))
-      ]).catch(() => false);
+        navigator.serviceWorker.ready.then((r) => ({ ready: true, reason: 'ready', scope: r.scope })),
+        new Promise<{ ready: false; reason: string }>((resolve) => setTimeout(() => resolve({ ready: false, reason: 'ready-poll-timeout' }), 1000))
+      ]).catch((e) => ({ ready: false, reason: 'ready-threw: ' + String(e) }));
       return reg;
-    }).catch(() => false);
-    if (ready) return true;
+    }).catch((e) => ({ ready: false, reason: 'evaluate-threw: ' + String(e) }));
+    if ((status as { ready: boolean }).ready) return;
+    lastError = (status as { reason: string }).reason;
     await page.waitForTimeout(500);
   }
-  return false;
+  throw new Error(`service worker did not reach 'ready' within ${SW_REGISTER_TIMEOUT_MS}ms (last status: ${lastError}). ` +
+    `The production build registers SW via registerWhenStable:30000 — missing SW means the precached app shell is unavailable ` +
+    `and the offline guarantee documented in README is broken.`);
 }
 
 test.describe('Service Worker / offline', () => {
   test('app shell reloads while the context is offline (SW serves the precached shell)', async ({ page, context }) => {
-    // First visit — online — so the SW installs and precaches the app shell.
+    // Playwright's default 30s per-test timeout is tighter than the app's own
+    // `registerWhenStable:30000` SW-registration window. Give the whole test
+    // enough room for SW registration + the offline-reload assertion.
+    test.setTimeout(90_000);
     await page.goto('/');
     await page.waitForURL(/login/);
-
-    // Extended retry window. Older versions of this test blanket-skipped after
-    // a single probe; we now poll for up to 20s before surrendering.
-    const hasSW = await waitForServiceWorker(page, 20_000);
-    if (!hasSW) {
-      test.info().annotations.push({ type: 'skip-reason', description: 'service worker did not install in this environment after 20s' });
-      test.skip(true, 'SW unavailable');
-      return;
-    }
+    await requireServiceWorker(page);
 
     // Flip the context offline and reload. The app shell must still render.
     await context.setOffline(true);
@@ -52,6 +60,7 @@ test.describe('Service Worker / offline', () => {
   });
 
   test('after login, going offline and reloading keeps the user inside the app (IndexedDB session + SW shell)', async ({ page, context }) => {
+    test.setTimeout(90_000);
     await page.goto('/');
     await page.waitForURL(/login/);
     await page.getByTestId('login-username').fill(ADMIN.user);
@@ -59,11 +68,7 @@ test.describe('Service Worker / offline', () => {
     await page.getByTestId('login-submit').click();
     await page.waitForURL(/projects/);
 
-    const hasSW = await waitForServiceWorker(page, 20_000);
-    if (!hasSW) {
-      test.skip(true, 'SW unavailable');
-      return;
-    }
+    await requireServiceWorker(page);
 
     await context.setOffline(true);
     await page.reload();

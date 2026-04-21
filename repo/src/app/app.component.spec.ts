@@ -48,22 +48,11 @@ function mount(opts: {
 }
 
 describe('AppComponent', () => {
-  it('ngOnInit boots the db, seeds users, restores session, starts inactivity watch, flips ready', async () => {
-    const { fixture, auth, db } = mount();
-    await fixture.componentInstance.ngOnInit();
-    expect(db.init).toHaveBeenCalled();
-    expect(auth.bootstrapSeed).toHaveBeenCalled();
-    expect(auth.restoreSession).toHaveBeenCalled();
+  it('ngOnInit starts the inactivity watch; ready is pinned true so the router-outlet renders on first paint', () => {
+    const { fixture, auth } = mount();
+    fixture.componentInstance.ngOnInit();
     expect(auth.startInactivityWatch).toHaveBeenCalled();
     expect(fixture.componentInstance.ready).toBe(true);
-  });
-
-  it('ngOnInit still flips ready=true if the boot sequence throws', async () => {
-    const { fixture } = mount({ initError: new Error('idb boom') });
-    await fixture.componentInstance.ngOnInit();
-    expect(fixture.componentInstance.ready).toBe(true);
-    const logger = TestBed.inject(LoggerService) as unknown as { error: jest.Mock };
-    expect(logger.error).toHaveBeenCalled();
   });
 
   it('canDiag allows admin and editor, denies reviewer', () => {

@@ -26,7 +26,10 @@ async function loginCreateAndOpen(page: Page, projectName: string): Promise<stri
   await page.getByText(projectName).first().click();
   await page.getByTestId('new-canvas-name').fill('Main');
   await page.getByTestId('new-canvas-create').click();
-  await page.waitForURL(/canvas/);
+  // Match the /canvas/ segment of the PATH — a bare /canvas/ regex would
+  // trivially match the hostname "flowcanvas" and return before the router
+  // has finished the project-list → canvas-editor navigation.
+  await page.waitForURL(/\/canvas\//);
   return page.url();
 }
 

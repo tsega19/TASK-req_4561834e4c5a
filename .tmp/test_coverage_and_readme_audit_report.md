@@ -1,71 +1,50 @@
 # Test Coverage and README Audit Report
 
-## Scope
-- Static inspection only (no test execution, builds, containers, scripts, package managers, or runtime commands).
-- Audit focus: test intent/coverage quality and README consistency with delivered project/testing shape.
+Date: April 21, 2026  
+Scope: Static inspection only (no test execution)
 
-## Project Shape Determination
-- Delivered project is a frontend/offline Angular SPA (no backend/API service surface owned by this repo).
-- Materially relevant test categories for this shape:
-  - Unit tests
-  - Frontend component tests
-  - Integration-style service/data tests (IndexedDB, auth/session, permissions, canvas logic)
-  - End-to-end tests
-- API tests are not required for this repo shape.
+## Tests Check
+Project type is a frontend-only Angular SPA (offline-first, IndexedDB, workers) with no owned backend API surface. For this shape, the relevant categories are unit/service tests, frontend component tests, integration-style data/service tests, and E2E flows.
 
-## Test Suite Findings
+### Present and Meaningful Test Categories
+1. Unit and service tests: Strong breadth across auth/session/cooldown, permissions, DB wrappers, import/export validation, canvas versioning/rollback/cap thresholds, diagnostics/backup logic, and logging/redaction.
+2. Frontend component tests: Meaningful coverage across project, backup, diagnostics, shared UI, and app-shell/session-navigation behavior.
+3. End-to-end tests (Playwright): Strong core and expanded feature coverage including login/cooldown, project/canvas authoring, import/export/rollback, cross-tab conflict flows, offline/service-worker behavior, workers, and added admin/backup/diagnostics journeys.
+4. API tests: Not required for this repository shape (no backend API owned in this repo).
 
-### Present and Meaningful
-- Unit/component/service coverage is substantial and non-trivial across core areas:
-  - Auth, cooldown/session/inactivity
-  - Permissions/role-based UI gating
-  - IndexedDB data services and persistence paths
-  - Canvas operations (caps, versioning, rollback, import/export validation)
-  - Backup/restore paths
-  - Logging/configuration
-  - Reviewer/admin/project workflows
-- E2E coverage includes:
-  - `smoke.spec.ts`
-  - `import-export-rollback.spec.ts`
-  - `offline.spec.ts`
-  - `multi-tab-conflict.spec.ts` (cross-tab autosave/conflict boundary)
-  - `workers.spec.ts` (worker runtime behavior and export artifact checks)
+### Sufficiency Assessment
+The suite is now strongly confidence-building for delivered behavior, with meaningful happy-path, failure-path, RBAC, and boundary checks across core and admin-facing features.
 
-### Coverage Intent Quality
-- Tests are not placeholder-only and generally validate behavior outcomes, not just superficial existence checks.
-- New E2E additions materially improve boundary confidence:
-  - Real multi-tab conflict flows
-  - Worker execution pathways with output validation (SVG/PNG/import/autosave compaction trigger)
-  - Offline/persistence checks include SW-independent paths to reduce skip-only blind spots
+## run_tests.sh Audit
+`run_tests.sh` exists and appears Docker-first by static inspection.
 
-## `run_tests.sh` Audit
-- `run_tests.sh` exists.
-- By static inspection, it orchestrates Docker/Compose-based test flow:
-  - Builds `flowcanvas` and `flowcanvas-tests`
-  - Runs Jest and Playwright inside `flowcanvas-tests` container
-  - Brings app container up/down for E2E target
-- Main test flow does not appear to require local host Node/Python setup beyond Docker/Compose orchestration.
-- Bash is used for orchestration, not as a substitute for application-level tests.
+What it does:
+1. Builds app + test images via Docker Compose.
+2. Runs Jest unit tests inside `flowcanvas-tests` container.
+3. Starts app container, then runs Playwright E2E in container.
+4. Produces summary/log artifacts and exits non-zero on test failure.
+
+Host dependency concern check:
+- Main test flow appears Docker/Compose-based and does not rely on local host Node/Python toolchains for primary execution.
 
 ## README Audit
-- README describes project as offline Angular SPA and documents both local and Docker paths.
-- README includes Docker-based test instruction (`./run_tests.sh`) consistent with repository test orchestration.
-- README states core behavior guarantees (element caps, version history/rollback, autosave/conflict), and these are now traceably represented across unit + E2E coverage.
-- No major README-to-test-shape mismatch identified from static inspection.
+README is consistent with current repository test setup and architecture.
 
-## Sufficiency Verdict
-- Test suite is broadly confidence-building for delivered scope.
-- Lower-level and boundary-level coverage are both meaningfully represented.
-- Remaining risk is mostly operational (potential E2E timing/SW environment flakiness), not major functional coverage absence.
+### Matches Observed Repo State
+1. Jest + Playwright claims map to actual configs/tests.
+2. Docker test execution via `run_tests.sh` is present and aligned.
+3. Offline/service-worker + IndexedDB architecture is reflected in code/tests.
+4. Stated behavioral guarantees (cap threshold, rollback/versioning, conflict handling) are traceably tested.
+
+### Remaining Minor Risks
+1. No major structural coverage gap remains from prior review; residual risk is ordinary E2E flakiness potential inherent to browser timing-dependent scenarios.
 
 ## Test Coverage Score
-- **93/100**
+**95 / 100**
 
 ## Score Rationale
-- High breadth and depth across relevant categories for this project shape.
-- Stronger E2E boundary coverage now addresses prior gaps (cross-tab conflict and worker runtime).
-- Minor deduction for environmental/timing sensitivity in some E2E paths.
+Score increased because prior key gaps are now materially addressed: SW tests fail rather than skip when SW readiness is missing, direct worker-module unit tests were added (`tests/unit/workers.spec.ts`), and admin/backup/diagnostics E2E coverage was added (`tests/e2e/admin.spec.ts`, `tests/e2e/backup.spec.ts`, `tests/e2e/diagnostics.spec.ts`). Coverage breadth and depth now align well with shipped scope.
 
-## Key Gaps (Residual)
-1. Service worker-dependent E2E cases can still skip in certain environments.
-2. Some autosave/timeout-driven E2E checks may be comparatively slower/flakier over time.
+## Key Gaps
+1. No critical coverage gap identified from static inspection.
+2. Remaining risk is mostly operational (possible E2E timing/environment flake), not obvious missing test intent.

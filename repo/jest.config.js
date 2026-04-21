@@ -9,7 +9,6 @@ module.exports = {
     'src/app/**/*.ts',
     '!src/app/**/*.spec.ts',
     '!src/app/**/index.ts',
-    '!src/app/workers/*.ts',
     // Istanbul cannot instrument `new Worker(new URL(..., import.meta.url))` —
     // the editor is still unit-tested by its spec, but excluded from coverage collection.
     '!src/app/features/canvas/canvas-editor.component.ts'

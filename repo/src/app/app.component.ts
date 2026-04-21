@@ -3,14 +3,13 @@ import { CommonModule } from '@angular/common';
 import { RouterLink, RouterLinkActive, RouterOutlet, Router, NavigationEnd } from '@angular/router';
 import { AuthService } from './core/services/auth.service';
 import { ToastContainerComponent } from './shared/components/toast-container.component';
-import { ConflictBannerComponent } from './shared/components/conflict-banner.component';
 import { NotificationCenterComponent } from './shared/components/notification-center.component';
 import { filter } from 'rxjs/operators';
 
 @Component({
   selector: 'fc-root',
   standalone: true,
-  imports: [CommonModule, RouterOutlet, RouterLink, RouterLinkActive, ToastContainerComponent, ConflictBannerComponent, NotificationCenterComponent],
+  imports: [CommonModule, RouterOutlet, RouterLink, RouterLinkActive, ToastContainerComponent, NotificationCenterComponent],
   template: `
     <div class="app-shell" *ngIf="ready">
       <header class="top-nav" *ngIf="auth.session() as s">
@@ -30,7 +29,6 @@ import { filter } from 'rxjs/operators';
         </div>
       </header>
       <main><router-outlet /></main>
-      <fc-conflict-banner />
     </div>
     <div *ngIf="!ready" class="loading">Loading FlowCanvas…</div>
     <fc-toast-container />
